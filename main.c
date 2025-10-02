@@ -30,8 +30,8 @@ enum tetrio_block {
 /* A tetrio piece, vec has the cordinates for all blocks that compose it */
 struct tetrio {
 	struct point {
-		unsigned short int x;
-		unsigned short int y;
+		short int x;
+		short int y;
 	} vec[TETRIO_VEC_SIZE];
 
 	_Bool hashit;
@@ -52,14 +52,20 @@ static void updtet(struct tetrio *tet) __attribute__((nothrow, nonnull));
 static void updscr(struct tetrio *tet) __attribute__((nothrow, nonnull));
 /* Creates a tetrio object, it must be deleted by a call to free() */
 static struct tetrio *gettet(void) __attribute__((nothrow, malloc, malloc(
-	free, 1)));
+	free, 1), cold));
+/* Moves `tet` to right of left if `d` is 1 or -1. Sets hashit on failure */
+static void mvside(struct tetrio *tet, short int d) __attribute__((nothrow,
+	nonnull));
+/* Collects and operates the input for ms time, does not move tetrio down */
+static void passms(struct tetrio *tet, unsigned ms) __attribute__((nothrow,
+	nonnull));
 
 
 int main(int argc, char *argv[argc + 1])
 {
 	struct tetrio *tet;
-	int i;
-	int j;
+	unsigned short rnd_ms;
+	unsigned int i;
 
 	init(*argv);
 
@@ -73,18 +79,24 @@ int main(int argc, char *argv[argc + 1])
 		__builtin_unreachable();
 	}
 
-	/* START TEST */
-	for (i = 0; i < 4; ++i) {
+	for (rnd_ms = 200; ; rnd_ms -= 2) {
 		tet = gettet();
-		updscr(tet);
-		for (j = 0; j < TETRIO_SCREEN_Y; ++j) {
+		while (!tet->hashit) {
+			passms(tet, rnd_ms);
 			updtet(tet);
 			updscr(tet);
-			getch();
+		}
+
+		/* LOST */
+		for (i = 0; i < TETRIO_VEC_SIZE; ++i) {
+			if (!tet->vec[i].y) {
+				free(tet);
+				return EXIT_FAILURE;
+				__builtin_unreachable();
+			}
 		}
 		free(tet);
 	}
-	/* END TEST */
 
 	exit(EXIT_SUCCESS);
 }
@@ -96,6 +108,8 @@ static void init(char *argv0)
 
 	initscr();
 	noecho();
+	keypad(stdscr, TRUE);
+	nodelay(stdscr, TRUE);
 	curs_set(0);
 
 	if (has_colors() == FALSE) {
@@ -162,6 +176,7 @@ static void updscr(struct tetrio *tet)
 {
 	int x;
 	int y;
+	_Bool clrrow;
 
 	wclear(tetrio_win);
 	x = getmaxx(stdscr);
@@ -172,6 +187,20 @@ static void updscr(struct tetrio *tet)
 				tet->vec[x].x + TETRIO_OFFSET_X, '#' |
 				COLOR_PAIR(tet->color));
 		}
+	}
+
+	for (y = 0; y < TETRIO_SCREEN_Y; ++y) {
+		for (clrrow = 1, x = 0; x < TETRIO_SCREEN_X; ++x) {
+			if (!block_vec[y][x]) {
+				clrrow = 0;
+				break;
+			}
+		}
+
+		if (!clrrow)
+			continue;
+		for (x = 0; x < TETRIO_SCREEN_X; ++x)
+			block_vec[y][x] = TETRIO_NONE;
 	}
 
 	for (y = 0; y < TETRIO_SCREEN_Y; ++y) {
@@ -225,4 +254,39 @@ static struct tetrio *gettet(void)
 	tet->color = col_tmpl[ci];
 	tet->hashit = 0;
 	return tet;
+}
+
+static void mvside(struct tetrio *tet, short int d)
+{
+	int i;
+	for (i = 0; i < TETRIO_VEC_SIZE; ++i)
+		if (tet->vec[i].x + d >= TETRIO_SCREEN_X || tet->vec[i].x + d
+			< 0 || block_vec[tet->vec[i].y][tet->vec[i].x + d]) {
+			tet->hashit = 1;
+			return;
+		}
+
+	for (i = 0; i < TETRIO_VEC_SIZE; ++i)
+		tet->vec[i].x += d;
+}
+
+static void passms(struct tetrio *tet, unsigned ms)
+{
+	clock_t beg;
+	int in;
+
+	beg = clock();
+	updscr(tet);
+	while (((double)(clock() - beg) / CLOCKS_PER_SEC) * 1000 < ms) {
+		switch ((in = getch())) {
+		case KEY_RIGHT:
+			mvside(tet, 1);
+			updscr(tet);
+			break;
+		case KEY_LEFT:
+			mvside(tet, -1);
+			updscr(tet);
+			break;
+		}
+	}
 }
