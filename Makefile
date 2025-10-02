@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Werror -Wextra -Wconversion -O2 -std=c99 -D_POSIX_C_SOURCE=1 \
-	-DNDEBUG -march=native -mtune=native -lncurses
+CFLAGS = -Wall -Werror -Wextra -Wconversion -O2 -std=c99 -pedantic \
+	-march=native -mtune=native -lncurses
 
 main : main.c
 
