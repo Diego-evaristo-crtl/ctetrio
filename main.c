@@ -92,6 +92,7 @@ int main(int argc, char *argv[argc + 1])
 static void init(char *argv0)
 {
 	size_t i;
+	int x;
 
 	initscr();
 	noecho();
@@ -115,10 +116,10 @@ static void init(char *argv0)
 	init_pair(TETRIO_GREEN,		COLOR_GREEN, 	COLOR_GREEN);
 	init_pair(TETRIO_PURPLE, 	COLOR_PURPLE, 	COLOR_PURPLE);
 
-	/* TODO: Centralize window based on getmaxyx() macro */
+	x = getmaxx(stdscr);
 	refresh();
 	if (!(tetrio_win = newwin(TETRIO_SCREEN_Y + 2, TETRIO_SCREEN_X + 2,
-			0, 0))) {
+			0, x / 2 - (TETRIO_SCREEN_X + 2) / 2))) {
 		endwin();
 		fprintf(stderr, "%s: init(): newwin(): %s", argv0,
 				strerror(errno));
@@ -163,6 +164,8 @@ static void updscr(struct tetrio *tet)
 	int y;
 
 	wclear(tetrio_win);
+	x = getmaxx(stdscr);
+	mvwin(tetrio_win, 0, x / 2 - (TETRIO_SCREEN_X + 2) / 2);
 	if (!tet->hashit) {
 		for (x = 0; (size_t)x < TETRIO_VEC_SIZE; ++x) {
 			mvwaddch(tetrio_win, tet->vec[x].y + TETRIO_OFFSET_Y,
@@ -217,6 +220,8 @@ static struct tetrio *gettet(void)
 	if (!(tet = malloc(sizeof(*tet))))
 		return NULL;
 	memcpy(tet->vec, vec_tmpl[ti], sizeof(tet->vec));
+	for (ti = 0; ti < TETRIO_VEC_SIZE; ++ti)
+		tet->vec[ti].x += TETRIO_SCREEN_X / 2;
 	tet->color = col_tmpl[ci];
 	tet->hashit = 0;
 	return tet;
