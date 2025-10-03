@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Werror -Wextra -Wconversion -O2 -std=c99 -pedantic \
-	-march=native -mtune=native -lncurses
+	-march=native -mtune=native -lcurses
 
 main : main.c
 
