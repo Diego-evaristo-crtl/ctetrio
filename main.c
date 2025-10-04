@@ -35,7 +35,9 @@ struct tetrio {
 	} arr[TETRIO_ARR_SIZE];
 	struct vec2d org;
 	enum tetrio_block color;
-	_Bool hashit;
+	_Bool hashit: 1;
+	_Bool canrot: 1;
+	_Bool: 0;
 };
 
 
@@ -54,12 +56,18 @@ static void updscr(struct tetrio *tet) __attribute__((nothrow, nonnull, hot));
 static struct tetrio *gettet(void) __attribute__((nothrow, malloc, malloc(
 	free, 1), cold));
 /* Moves `tet` to right of left if `d` is 1 or -1. Sets hashit on failure */
-static void mvside(struct tetrio *tet, short int d) __attribute__((nothrow,
+static void mvtet(struct tetrio *tet, short int d) __attribute__((nothrow,
+	nonnull));
+/* Rotates tet to the right or left depending on `r`. Does not complete if that
+ * would make the tetrio outside of the screen, sets hashit if it is valid but
+ * hitted one of the borders
+ */
+static void rottet(struct tetrio *tet, _Bool r) __attribute__((nothrow,
 	nonnull));
 /* Collects and operates the input for ms time, does not move tetrio down */
 static void passms(struct tetrio *tet, unsigned ms) __attribute__((nothrow,
 	nonnull));
-/* Returns 1 if tetrio has hit something */
+/* Returns 1 if tetrio has hit something, does not set tet->hashit */
 static _Bool hashit(struct tetrio *tet, short int dy, short int dx)
 	__attribute__((nothrow, nonnull, hot));
 
@@ -233,35 +241,44 @@ static struct tetrio *gettet(void)
 	static const short int orgy_tmpl[TETRIO_TEMPLATE_NUM] = {
 		0, 2, 1, 1, 1, 1, 1
 	};
+	static const _Bool canrot_tmpl[TETRIO_TEMPLATE_NUM] = {
+		0, 1, 1, 1, 1, 1, 1
+	};
 	static const enum tetrio_block col_tmpl[TETRIO_COLOR_NUM] = {
 		TETRIO_GREEN, TETRIO_RED, TETRIO_CYAN, TETRIO_BLUE,
 		TETRIO_YELLOW, TETRIO_PURPLE,
 	};
 
 	struct tetrio *tet;
+	unsigned int i;
 	int ti;
 	int ci;
 
-	assert(ARRAY_SIZE(vec_tmpl) == TETRIO_TEMPLATE_NUM);
-	assert(ARRAY_SIZE(col_tmpl) == TETRIO_COLOR_NUM);
-
-	srand((unsigned int)time(NULL));
 	ti = rand() % TETRIO_TEMPLATE_NUM;
 	ci = rand() % TETRIO_COLOR_NUM;
+
+	assert(ARRAY_SIZE(vec_tmpl) 	== TETRIO_TEMPLATE_NUM);
+	assert(ARRAY_SIZE(orgy_tmpl) 	== TETRIO_TEMPLATE_NUM);
+	assert(ARRAY_SIZE(canrot_tmpl) 	== TETRIO_TEMPLATE_NUM);
+	assert(ARRAY_SIZE(col_tmpl) 	== TETRIO_COLOR_NUM);
+
+	srand((unsigned int)time(NULL));
 
 	if (!(tet = malloc(sizeof(*tet))))
 		return NULL;
 	memcpy(tet->arr, vec_tmpl[ti], sizeof(tet->arr));
-	for (ti = 0; ti < TETRIO_ARR_SIZE; ++ti)
-		tet->arr[ti].x += TETRIO_SCREEN_X / 2;
-	tet->org.x = TETRIO_SCREEN_X / 2;
-	tet->org.y = orgy_tmpl[ti];
-	tet->color = col_tmpl[ci];
-	tet->hashit = 0;
+	for (i = 0; i < TETRIO_ARR_SIZE; ++i)
+		tet->arr[i].x += TETRIO_SCREEN_X / 2;
+	tet->org.x 	= TETRIO_SCREEN_X / 2;
+	tet->org.y 	= orgy_tmpl[ti];
+	tet->canrot 	= canrot_tmpl[ti];
+	tet->color 	= col_tmpl[ci];
+	tet->hashit 	= 0;
+
 	return tet;
 }
 
-static void mvside(struct tetrio *tet, short int d)
+static void mvtet(struct tetrio *tet, short int d)
 {
 	int i;
 	if (tet->org.x + d > TETRIO_SCREEN_X || tet->org.x + d < 0) {
@@ -278,6 +295,37 @@ static void mvside(struct tetrio *tet, short int d)
 	tet->org.x += d;
 }
 
+static void rottet(struct tetrio *tet, _Bool r)
+{
+	struct tetrio ntet;
+	unsigned int i;
+	short int _x;
+	short int _y;
+	short int m[2];
+
+	if (!tet->canrot)
+		return;
+	if (r) { /* Rotate to the right */
+		m[0] = -1;
+		m[1] = 1;
+	} else {
+		m[0] = 1;
+		m[1] = -1;
+	}
+
+	for (i = 0; i < TETRIO_ARR_SIZE; ++i) {
+		_x = tet->arr[i].x - tet->org.x;
+		_y = tet->arr[i].y - tet->org.y;
+		ntet.arr[i].x = (short)(_y * m[0]) + tet->org.x;
+		ntet.arr[i].y = (short)(_x * m[1]) + tet->org.y;
+	}
+
+	ntet.org = tet->org;
+	if (hashit(&ntet, 0, 0))
+		return;
+	memcpy(tet->arr, ntet.arr, sizeof(tet->arr));
+}
+
 static void passms(struct tetrio *tet, unsigned ms)
 {
 	clock_t beg;
@@ -288,11 +336,19 @@ static void passms(struct tetrio *tet, unsigned ms)
 	while (((double)(clock() - beg) / CLOCKS_PER_SEC) * 1000 < ms) {
 		switch ((in = getch())) {
 		case KEY_RIGHT:
-			mvside(tet, 1);
+			mvtet(tet, 1);
 			updscr(tet);
 			break;
 		case KEY_LEFT:
-			mvside(tet, -1);
+			mvtet(tet, -1);
+			updscr(tet);
+			break;
+		case KEY_UP:
+			rottet(tet, 1);
+			updscr(tet);
+			break;
+		case KEY_DOWN:
+			rottet(tet, 0);
 			updscr(tet);
 			break;
 		}
