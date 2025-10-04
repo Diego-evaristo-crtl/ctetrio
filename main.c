@@ -11,8 +11,10 @@
 #define TETRIO_SCREEN_Y 20
 #define TETRIO_SCREEN_X 10
 /* Add this to x and y when printing to tetrio_win */
-#define TETRIO_OFFSET_Y 1
 #define TETRIO_OFFSET_X 1
+#define TETRIO_OFFSET_Y 1
+#define TETRIO_PREVIEW_OFFSET_Y TETRIO_OFFSET_Y
+#define TETRIO_PREVIEW_OFFSET_X (2 - TETRIO_SCREEN_X / 2)
 /* Number of different pieces && size of blocks per piece */
 #define TETRIO_TEMPLATE_NUM 	7
 #define TETRIO_ARR_SIZE 	4
@@ -41,9 +43,10 @@ struct tetrio {
 };
 
 
-/* All blocks on screen,  block_vec[TETRIO_SCREEN_Y] only has TETRIO_HITBOXEs */
+/* All blocks on screen, block_vec[TETRIO_SCREEN_Y] only has TETRIO_HITBOXEs */
 static enum tetrio_block block_vec[TETRIO_SCREEN_Y][TETRIO_SCREEN_X];
 static WINDOW *tetrio_win;
+static WINDOW *preview_win;
 
 /* Initializes the screen, colors, etc. Will exit if an error is detected */
 static void init(char *argv0) __attribute__((nothrow, cold));
@@ -51,7 +54,8 @@ static void deinit(void) __attribute__((nothrow, cold));
 /* Moves `tet` around the screen, sets tet.hashit if it hits something */
 static void updtet(struct tetrio *tet) __attribute__((nothrow, nonnull));
 /* Updates the screen based on the main block */
-static void updscr(struct tetrio *tet) __attribute__((nothrow, nonnull, hot));
+static void updscr(const struct tetrio *tet, const struct tetrio *prev)
+	__attribute__((nothrow, nonnull, hot));
 /* Creates a tetrio object, it must be deleted by a call to free() */
 static struct tetrio *gettet(void) __attribute__((nothrow, malloc, malloc(
 	free, 1), cold));
@@ -64,39 +68,42 @@ static void mvtet(struct tetrio *tet, short int d) __attribute__((nothrow,
  */
 static void rottet(struct tetrio *tet, _Bool r) __attribute__((nothrow,
 	nonnull));
-/* Collects and operates the input for ms time, does not move tetrio down */
-static void passms(struct tetrio *tet, unsigned ms) __attribute__((nothrow,
+/* Collects and operates the input for ms time, does not call updtet() */
+static void passms(struct tetrio *tet[2], unsigned ms) __attribute__((nothrow,
 	nonnull));
 /* Returns 1 if tetrio has hit something, does not set tet->hashit */
-static _Bool hashit(struct tetrio *tet, short int dy, short int dx)
+static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
 	__attribute__((nothrow, nonnull, hot));
 
 
 int main(int argc, char *argv[argc + 1])
 {
-	struct tetrio *tet;
+	struct tetrio *tet[2]; /* tet[1] Is the preview */
 	unsigned short rnd_ms;
 	unsigned int i;
 
 	init(*argv);
 
+	tet[1] = gettet();
 	for (rnd_ms = 200; ; rnd_ms -= 2) {
-		tet = gettet();
-		while (!tet->hashit) {
+		tet[0] = tet[1];
+		tet[1] = gettet();
+		while (!tet[0]->hashit) {
 			passms(tet, rnd_ms);
-			updtet(tet);
-			updscr(tet);
+			updtet(tet[0]);
+			updscr(tet[0], tet[1]);
 		}
 
 		/* LOST */
 		for (i = 0; i < TETRIO_ARR_SIZE; ++i) {
-			if (!tet->arr[i].y) {
-				free(tet);
+			if (!tet[0]->arr[i].y) {
+				free(tet[0]);
+				free(tet[1]);
 				return EXIT_FAILURE;
 				__builtin_unreachable();
 			}
 		}
-		free(tet);
+		free(tet[0]);
 	}
 
 	exit(EXIT_SUCCESS);
@@ -133,16 +140,27 @@ static void init(char *argv0)
 	x = getmaxx(stdscr);
 	refresh();
 	if (!(tetrio_win = newwin(TETRIO_SCREEN_Y + 2, TETRIO_SCREEN_X + 2,
-			0, x / 2 - (TETRIO_SCREEN_X + 2) / 2))) {
+	0, x / 2 - (TETRIO_SCREEN_X + 2) / 2))) {
 		endwin();
-		fprintf(stderr, "%s: init(): newwin(): %s", argv0,
-				strerror(errno));
+		fprintf(stderr, "%s: ERR: init(): newwin(tetrio_win)", argv0);
 		exit(EXIT_FAILURE);
 		__builtin_unreachable();
 	}
-
 	box(tetrio_win, 0, 0);
 	wrefresh(tetrio_win);
+
+	x = getmaxx(tetrio_win);
+	if (!(preview_win = newwin(TETRIO_ARR_SIZE + 2, TETRIO_ARR_SIZE + 2,
+	2, x * 2))) {
+		clear();
+		delwin(tetrio_win);
+		endwin();
+		fprintf(stderr, "%s: ERR: init(): newwin(preview_win)", argv0);
+		exit(EXIT_FAILURE);
+		__builtin_unreachable();
+	}
+	box(preview_win, 0, 0);
+	wrefresh(preview_win);
 
 	/* TODO: make this fallback to manually calling deinit() */
 	if (atexit(deinit)) {
@@ -157,9 +175,9 @@ static void init(char *argv0)
 
 static void deinit(void)
 {
-	wborder(tetrio_win, ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
-	wrefresh(tetrio_win);
+	clear();
 	delwin(tetrio_win);
+	delwin(preview_win);
 	endwin();
 }
 
@@ -179,7 +197,7 @@ static void updtet(struct tetrio *tet)
 	}
 }
 
-static void updscr(struct tetrio *tet)
+static void updscr(const struct tetrio *tet, const struct tetrio *prev)
 {
 	int x;
 	int y;
@@ -194,13 +212,11 @@ static void updscr(struct tetrio *tet)
 	wclear(tetrio_win);
 	x = getmaxx(stdscr);
 	mvwin(tetrio_win, 0, x / 2 - (TETRIO_SCREEN_X + 2) / 2);
-	if (!tet->hashit) {
-		for (x = 0; (size_t)x < TETRIO_ARR_SIZE; ++x) {
+	if (!tet->hashit)
+		for (x = 0; (size_t)x < TETRIO_ARR_SIZE; ++x)
 			mvwaddch(tetrio_win, tet->arr[x].y + TETRIO_OFFSET_Y,
 				tet->arr[x].x + TETRIO_OFFSET_X, '#' |
 				COLOR_PAIR(tet->color));
-		}
-	}
 
 	for (y = 0; y < TETRIO_SCREEN_Y; ++y) {
 		for (clrrow = 1, x = 0; x < TETRIO_SCREEN_X && clrrow; ++x)
@@ -212,18 +228,22 @@ static void updscr(struct tetrio *tet)
 		}
 	}
 
-	for (y = 0; y < TETRIO_SCREEN_Y; ++y) {
-		for (x = 0; x < TETRIO_SCREEN_X; ++x) {
-			if (block_vec[y][x]) {
+	for (y = 0; y < TETRIO_SCREEN_Y; ++y)
+		for (x = 0; x < TETRIO_SCREEN_X; ++x)
+			if (block_vec[y][x])
 				mvwaddch(tetrio_win, y + TETRIO_OFFSET_Y,
 					x + TETRIO_OFFSET_X, '#' |
 					COLOR_PAIR(block_vec[y][x]));
-			}
-		}
-	}
-
 	box(tetrio_win, 0, 0);
 	wrefresh(tetrio_win);
+
+	wclear(preview_win);
+	for (x = 0; x < TETRIO_ARR_SIZE; ++x)
+		mvwaddch(preview_win, prev->arr[x].y + TETRIO_PREVIEW_OFFSET_Y,
+			prev->arr[x].x + TETRIO_PREVIEW_OFFSET_X, '#' |
+			COLOR_PAIR(prev->color));
+	box(preview_win, 0, 0);
+	wrefresh(preview_win);
 }
 
 static struct tetrio *gettet(void)
@@ -326,36 +346,44 @@ static void rottet(struct tetrio *tet, _Bool r)
 	memcpy(tet->arr, ntet.arr, sizeof(tet->arr));
 }
 
-static void passms(struct tetrio *tet, unsigned ms)
+static void passms(struct tetrio *tet[2], unsigned ms)
 {
 	clock_t beg;
 	int in;
 
 	beg = clock();
-	updscr(tet);
+	updscr(tet[0], tet[1]);
 	while (((double)(clock() - beg) / CLOCKS_PER_SEC) * 1000 < ms) {
 		switch ((in = getch())) {
 		case KEY_RIGHT:
-			mvtet(tet, 1);
-			updscr(tet);
+			mvtet(tet[0], 1);
+			updscr(tet[0], tet[1]);
 			break;
 		case KEY_LEFT:
-			mvtet(tet, -1);
-			updscr(tet);
+			mvtet(tet[0], -1);
+			updscr(tet[0], tet[1]);
 			break;
 		case KEY_UP:
-			rottet(tet, 1);
-			updscr(tet);
+			rottet(tet[0], 1);
+			updscr(tet[0], tet[1]);
 			break;
 		case KEY_DOWN:
-			rottet(tet, 0);
-			updscr(tet);
+			rottet(tet[0], 0);
+			updscr(tet[0], tet[1]);
+			break;
+		case 'a':
+			rottet(tet[1], 1);
+			updscr(tet[0], tet[1]);
+			break;
+		case 'd':
+			rottet(tet[1], 0);
+			updscr(tet[0], tet[1]);
 			break;
 		}
 	}
 }
 
-static _Bool hashit(struct tetrio *tet, short int dy, short int dx)
+static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
 {
 	unsigned int i;
 	if (tet->org.x >= TETRIO_SCREEN_X 	|| tet->org.x < 0 	||
