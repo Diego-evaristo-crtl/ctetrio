@@ -1,9 +1,14 @@
 CC = gcc
 CFLAGS = -Wall -Werror -Wextra -Wconversion -O2 -std=c99 -pedantic \
 	-march=native -mtune=native -lcurses
+OBJS = menu.o main.o
 
-main : main.c
+
+main : $(OBJS) menu.h
+	$(CC) $(CFLAGS) $(OBJS) -o main
+main.o : main.c menu.h menu.o
+menu.o : menu.c menu.h
 
 .PHONY : clean
 clean :
-	-rm main 2>/dev/null || true
+	-rm $(OBJS) main 2>/dev/null || true
