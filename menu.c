@@ -35,8 +35,10 @@ int mkmenu(unsigned int xlen, unsigned int ylen)
 
 void demenu(void)
 {
-	if (mopts)
+	if (mopts) {
 		free(mopts);
+		mopts = NULL;
+	}
 	wclear(menu_win);
 	wrefresh(menu_win);
 	delwin(menu_win);

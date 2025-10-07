@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <signal.h>
 #include <errno.h>
 #include <time.h>
+#include "menu.h"
 
 
 /* Tries changing magenta to purple during init(), fallback if it fails */
@@ -19,6 +21,8 @@
 #define TETRIO_TEMPLATE_NUM 	7
 #define TETRIO_ARR_SIZE 	4
 #define TETRIO_COLOR_NUM 	6
+/* Menu related macros */
+#define MENU_OPT_NUM 2
 /* Generalized macros */
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -47,6 +51,7 @@ struct tetrio {
 static enum tetrio_block block_vec[TETRIO_SCREEN_Y][TETRIO_SCREEN_X];
 static WINDOW *tetrio_win;
 static WINDOW *preview_win;
+static _Bool is_paused;
 
 /* Initializes the screen, colors, etc. Will exit if an error is detected */
 static void init(char *argv0) __attribute__((nothrow, cold));
@@ -74,6 +79,13 @@ static void passms(struct tetrio *tet[2], unsigned ms) __attribute__((nothrow,
 /* Returns 1 if tetrio has hit something, does not set tet->hashit */
 static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
 	__attribute__((nothrow, nonnull, hot));
+/* Both of these are to be given to the menu helper functions from menu.h */
+static void *resumegame(void *_) __attribute__((nothrow, cold));
+static void *endgame(void *_) __attribute__((nothrow, noreturn));
+/* Exiting game through signals */
+static void sig_endgame(int _) __attribute__((nothrow, noreturn));
+/* Actually pauses the game */
+static int pause_game(void) __attribute__((nothrow, cold));
 
 
 int main(int argc, char *argv[argc + 1])
@@ -89,6 +101,8 @@ int main(int argc, char *argv[argc + 1])
 		tet[0] = tet[1];
 		tet[1] = gettet();
 		while (!tet[0]->hashit) {
+			if (is_paused)
+				pause_game();
 			passms(tet, rnd_ms);
 			updtet(tet[0]);
 			updscr(tet[0], tet[1]);
@@ -122,7 +136,7 @@ static void init(char *argv0)
 	if (has_colors() == FALSE) {
 		endwin();
 		fprintf(stderr, "%s: init(): Your terminal does not "
-				"support colors, Get a proper one!\n", argv0);
+			"support colors, Get a proper one!\n", argv0);
 		exit(EXIT_FAILURE);
 		__builtin_unreachable();
 	}
@@ -142,7 +156,8 @@ static void init(char *argv0)
 	if (!(tetrio_win = newwin(TETRIO_SCREEN_Y + 2, TETRIO_SCREEN_X + 2,
 	0, x / 2 - (TETRIO_SCREEN_X + 2) / 2))) {
 		endwin();
-		fprintf(stderr, "%s: ERR: init(): newwin(tetrio_win)", argv0);
+		fprintf(stderr, "%s: ERR: init(): newwin(tetrio_win)\n",
+			argv0);
 		exit(EXIT_FAILURE);
 		__builtin_unreachable();
 	}
@@ -155,18 +170,26 @@ static void init(char *argv0)
 		clear();
 		delwin(tetrio_win);
 		endwin();
-		fprintf(stderr, "%s: ERR: init(): newwin(preview_win)", argv0);
+		fprintf(stderr, "%s: ERR: init(): newwin(preview_win)\n",
+			argv0);
 		exit(EXIT_FAILURE);
 		__builtin_unreachable();
 	}
 	box(preview_win, 0, 0);
 	wrefresh(preview_win);
 
+	if (signal(SIGINT, sig_endgame) == SIG_ERR) {
+		deinit();
+		fprintf(stderr, "%s: init(): signal(SIGSTOP, ...): %s\n",
+			argv0, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
 	/* TODO: make this fallback to manually calling deinit() */
 	if (atexit(deinit)) {
 		endwin();
 		fprintf(stderr, "%s: Failed to register deinit() with"
-				"atexit()\n", argv0);
+			"atexit()\n", argv0);
 		deinit();
 		exit(EXIT_FAILURE);
 		__builtin_unreachable();
@@ -379,6 +402,9 @@ static void passms(struct tetrio *tet[2], unsigned ms)
 			rottet(tet[1], 0);
 			updscr(tet[0], tet[1]);
 			break;
+		case 'm':
+			is_paused = 1;
+			break;
 		}
 	}
 }
@@ -398,4 +424,53 @@ static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
 		block_vec[tet->arr[i].y + dy][tet->arr[i].x + dx])
 			return 1;
 	return 0;
+}
+
+static int pause_game(void)
+{
+	static struct menuopt opts[MENU_OPT_NUM] = {
+		{.opts = "Resume", 	.arg = NULL, 	.optf = resumegame},
+		{.opts = "Exit", 	.arg = NULL,	.optf = endgame},
+	};
+
+	clear();
+	if (mkmenu(10, 5) == -1) {
+		is_paused = 0;
+		return -1;
+	} else if (addmopt(opts) == -1) {
+		demenu();
+		is_paused = 0;
+		return -1;
+	} else if (addmopt(opts + 1) == -1) {
+		demenu();
+		is_paused = 0;
+		return -1;
+	}
+
+	while (is_paused)
+		menuwait();
+	demenu();
+	is_paused = 0;
+	return 0;
+}
+
+static void *endgame(void *_)
+{
+	(void)_;
+	if (is_paused)
+		demenu();
+	exit(EXIT_SUCCESS); /* Deinit() get's called by default */
+}
+
+static void *resumegame(void *_)
+{
+	(void)_;
+	is_paused = 0;
+	return NULL;
+}
+
+static void sig_endgame(int _)
+{
+	(void)_;
+	endgame(NULL);
 }
