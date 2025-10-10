@@ -4,11 +4,11 @@ CFLAGS = -Wall -Werror -Wextra -Wconversion -O2 -std=c99 -pedantic \
 OBJS = menu.o main.o
 
 
-main : $(OBJS) menu.h
-	$(CC) $(CFLAGS) $(OBJS) -o main
+ctetrio : $(OBJS) menu.h
+	$(CC) $(CFLAGS) $(OBJS) -o ctetrio
 main.o : main.c menu.h menu.o
 menu.o : menu.c menu.h
 
 .PHONY : clean
 clean :
-	-rm $(OBJS) main 2>/dev/null || true
+	-rm $(OBJS) ctetrio 2>/dev/null || true

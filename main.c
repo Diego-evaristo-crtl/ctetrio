@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <signal.h>
 #include <errno.h>
 #include <time.h>
 #include "menu.h"
@@ -36,8 +35,8 @@ enum tetrio_block {
 /* A tetrio piece, vec has the cordinates for all blocks that compose it */
 struct tetrio {
 	struct vec2d {
-		short int x;
-		short int y;
+		short x;
+		short y;
 	} arr[TETRIO_ARR_SIZE];
 	struct vec2d org;
 	enum tetrio_block color;
@@ -65,7 +64,7 @@ static void updscr(const struct tetrio *tet, const struct tetrio *prev)
 static struct tetrio *gettet(void) __attribute__((nothrow, malloc, malloc(
 	free, 1), cold));
 /* Moves `tet` to right of left if `d` is 1 or -1. Sets hashit on failure */
-static void mvtet(struct tetrio *tet, short int d) __attribute__((nothrow,
+static void mvtet(struct tetrio *tet, short d) __attribute__((nothrow,
 	nonnull));
 /* Rotates tet to the right or left depending on `r`. Does not complete if that
  * would make the tetrio outside of the screen, sets hashit if it is valid but
@@ -77,16 +76,14 @@ static void rottet(struct tetrio *tet, _Bool r) __attribute__((nothrow,
 static void passms(struct tetrio *tet[2], unsigned ms) __attribute__((nothrow,
 	nonnull));
 /* Returns 1 if tetrio has hit something, does not set tet->hashit */
-static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
+static _Bool hashit(const struct tetrio *tet, short dy, short dx)
 	__attribute__((nothrow, nonnull, pure, hot));
 /* Returns 1 if the tetrio hit something and has an arr[i].y below 1 */
 static _Bool haslost(const struct tetrio *tet) __attribute__((nothrow,
 	nonnull, pure));
 /* Both of these are to be given to the menu helper functions from menu.h */
-static void *resumegame(void *_) __attribute__((nothrow, cold));
-static void *endgame(void *_) __attribute__((nothrow, noreturn, cold));
-/* Exiting game through signals */
-static void sig_endgame(int _) __attribute__((nothrow, noreturn, cold));
+static void resumegame(void) __attribute__((nothrow, cold));
+static void endgame(void) __attribute__((nothrow, noreturn, cold));
 /* Actually pauses the game */
 static int pause_game(void) __attribute__((nothrow, cold));
 /* Initializes a tetrio to be put into the actual screen */
@@ -117,7 +114,6 @@ int main(int argc, char *argv[argc + 1])
 			free(tet[0]);
 			free(tet[1]);
 			exit(EXIT_FAILURE);
-			__builtin_unreachable();
 		}
 		free(tet[0]);
 	}
@@ -140,7 +136,6 @@ static void init(char *argv0)
 		fprintf(stderr, "%s: init(): Your terminal does not "
 			"support colors, Get a proper one!\n", argv0);
 		exit(EXIT_FAILURE);
-		__builtin_unreachable();
 	}
 
 	start_color();
@@ -161,7 +156,6 @@ static void init(char *argv0)
 		fprintf(stderr, "%s: ERR: init(): newwin(tetrio_win)\n",
 			argv0);
 		exit(EXIT_FAILURE);
-		__builtin_unreachable();
 	}
 	box(tetrio_win, 0, 0);
 	wrefresh(tetrio_win);
@@ -175,17 +169,9 @@ static void init(char *argv0)
 		fprintf(stderr, "%s: ERR: init(): newwin(preview_win)\n",
 			argv0);
 		exit(EXIT_FAILURE);
-		__builtin_unreachable();
 	}
 	box(preview_win, 0, 0);
 	wrefresh(preview_win);
-
-	if (signal(SIGINT, sig_endgame) == SIG_ERR) {
-		deinit();
-		fprintf(stderr, "%s: init(): signal(SIGSTOP, ...): %s\n",
-			argv0, strerror(errno));
-		exit(EXIT_FAILURE);
-	}
 
 	/* TODO: make this fallback to manually calling deinit() */
 	if (atexit(deinit)) {
@@ -194,7 +180,6 @@ static void init(char *argv0)
 			"atexit()\n", argv0);
 		deinit();
 		exit(EXIT_FAILURE);
-		__builtin_unreachable();
 	}
 }
 
@@ -288,7 +273,7 @@ static struct tetrio *gettet(void)
 		{{0, 1}, {1, 1}, {0, 1}, {0, 2}},
 		{{0, 0}, {0, 1}, {1, 1}, {1, 2}},
 	};
-	static const short int orgy_tmpl[TETRIO_TEMPLATE_NUM] = {
+	static const short orgy_tmpl[TETRIO_TEMPLATE_NUM] = {
 		0, 2, 1, 1, 1, 1, 1
 	};
 	static const _Bool canrot_tmpl[TETRIO_TEMPLATE_NUM] = {
@@ -300,7 +285,7 @@ static struct tetrio *gettet(void)
 	};
 
 	struct tetrio *tet;
-	unsigned int i;
+	unsigned i;
 	int ti;
 	int ci;
 
@@ -312,7 +297,7 @@ static struct tetrio *gettet(void)
 	assert(ARRAY_SIZE(canrot_tmpl) 	== TETRIO_TEMPLATE_NUM);
 	assert(ARRAY_SIZE(col_tmpl) 	== TETRIO_COLOR_NUM);
 
-	srand((unsigned int)time(NULL));
+	srand((unsigned)time(NULL));
 
 	if (!(tet = malloc(sizeof(*tet))))
 		return NULL;
@@ -339,7 +324,7 @@ static void inittet(struct tetrio *tet)
 	tet->org.y -= (short)(m + 1);
 }
 
-static void mvtet(struct tetrio *tet, short int d)
+static void mvtet(struct tetrio *tet, short d)
 {
 	unsigned i;
 
@@ -354,20 +339,15 @@ static void mvtet(struct tetrio *tet, short int d)
 static void rottet(struct tetrio *tet, _Bool r)
 {
 	struct tetrio ntet;
-	unsigned int i;
-	short int _x;
-	short int _y;
-	short int m[2];
+	unsigned i;
+	short _x;
+	short _y;
+	short m[2];
 
 	if (!tet->canrot)
 		return;
-	if (r) { /* Rotate to the right */
-		m[0] = -1;
-		m[1] = 1;
-	} else {
-		m[0] = 1;
-		m[1] = -1;
-	}
+	m[0] = r ? -1 :  1; /* If r, rotate to the right */
+	m[1] = r ?  1 : -1;
 
 	for (i = 0; i < TETRIO_ARR_SIZE; ++i) {
 		_x = tet->arr[i].x - tet->org.x;
@@ -431,9 +411,9 @@ static _Bool haslost(const struct tetrio *tet)
 	return 0;
 }
 
-static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
+static _Bool hashit(const struct tetrio *tet, short dy, short dx)
 {
-	unsigned int i;
+	unsigned i;
 
 	for (i = 0; i < TETRIO_ARR_SIZE; ++i) {
 		if (tet->arr[i].y < 0)
@@ -452,8 +432,8 @@ static _Bool hashit(const struct tetrio *tet, short int dy, short int dx)
 static int pause_game(void)
 {
 	static struct menuopt opts[MENU_OPT_NUM] = {
-		{.opts = "Resume", 	.arg = NULL, 	.optf = resumegame},
-		{.opts = "Exit", 	.arg = NULL,	.optf = endgame},
+		{.str = "Resume", 	.func = resumegame},
+		{.str = "Exit", 	.func = endgame},
 	};
 
 	clear();
@@ -472,28 +452,19 @@ static int pause_game(void)
 
 	while (is_paused)
 		menuwait();
-	demenu();
 	is_paused = 0;
+	demenu();
 	return 0;
 }
 
-static void *endgame(void *_)
+static void endgame(void)
 {
-	(void)_;
 	if (is_paused)
 		demenu();
 	exit(EXIT_SUCCESS); /* Deinit() get's called by default */
 }
 
-static void *resumegame(void *_)
+static void resumegame(void)
 {
-	(void)_;
 	is_paused = 0;
-	return NULL;
-}
-
-static void sig_endgame(int _)
-{
-	(void)_;
-	endgame(NULL);
 }

@@ -13,7 +13,7 @@ struct menuopt **mopts; /* Options of the menu */
 static void updmenu() __attribute__((nothrow));
 
 
-int mkmenu(unsigned int xlen, unsigned int ylen)
+int mkmenu(unsigned xlen, unsigned ylen)
 {
 	int x;
 	int y;
@@ -56,7 +56,7 @@ int addmopt(struct menuopt *opt)
 	return 0;
 }
 
-void *menuwait(void)
+void menuwait(void)
 {
 	int ch;
 
@@ -78,11 +78,10 @@ void *menuwait(void)
 		case '\n':
 		case '\r':
 		case KEY_RIGHT:
-			return mopts[copt]->optf(mopts[copt]->arg);
+			mopts[copt]->func();
+			return;
 		}
 	}
-
-	return NULL;
 }
 
 static void updmenu()
@@ -100,10 +99,10 @@ static void updmenu()
 	for (i = 0; i < moptind; ++i) {
 		if (i == copt) {
 			wattron(menu_win, COLOR_PAIR(MENU_COLOR));
-			mvwprintw(menu_win, (int)i + 1, 1, mopts[i]->opts);
+			mvwprintw(menu_win, (int)i + 1, 1, mopts[i]->str);
 			wattroff(menu_win, COLOR_PAIR(MENU_COLOR));
 		} else {
-			mvwprintw(menu_win, (int)i + 1, 1, mopts[i]->opts);
+			mvwprintw(menu_win, (int)i + 1, 1, mopts[i]->str);
 		}
 	}
 
